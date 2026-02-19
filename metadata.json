@@ -1,0 +1,8 @@
+{
+  "name": "Special Sense AI Assistant",
+  "description": "A neuro-symbolic AI assistant implementing the Antahkarana Stack for causal, safe, and explainable reasoning.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
