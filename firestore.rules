@@ -1,0 +1,143 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Helpers
+    function isSignedIn() { return request.auth != null; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { 
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    // Role Checks
+    function isProjectMember(projectId) {
+      return isSignedIn() && (request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.memberIds);
+    }
+    
+    function isProjectOwner(projectId) {
+      return isSignedIn() && get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid;
+    }
+
+    // Entity Validators
+    function isValidUser(data) {
+      return (!('email' in data) || data.email == null || data.email is string)
+        && (!('displayName' in data) || data.displayName == null || data.displayName is string)
+        && (!('photoURL' in data) || data.photoURL == null || data.photoURL is string)
+        && (!('createdAt' in data) || data.createdAt is timestamp || data.createdAt is number || data.createdAt == request.time)
+        && (!('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt is number || data.updatedAt == request.time);
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['name', 'ownerId', 'memberIds']) && data.name is string && data.name.size() <= 100
+        && data.ownerId is string && data.ownerId == request.auth.uid
+        && data.memberIds is list && data.memberIds.size() > 0 && data.memberIds.size() <= 100
+        && (!('createdAt' in data) || data.createdAt == request.time || data.createdAt is number)
+        && (!('updatedAt' in data) || data.updatedAt == request.time || data.updatedAt is number);
+    }
+    
+    function isValidMember(data) {
+      return data.keys().hasAll(['role']) && data.role in ['editor', 'viewer']
+        && (!('joinedAt' in data) || data.joinedAt == request.time || data.joinedAt is number);
+    }
+    
+    function isValidChannel(data) {
+      return data.keys().hasAll(['name']) && data.name is string && data.name.size() <= 50
+        && (!('createdAt' in data) || data.createdAt == request.time || data.createdAt is number);
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['text', 'senderId']) && data.text is string && data.text.size() <= 1000
+        && data.senderId is string && data.senderId == request.auth.uid
+        && (!('senderName' in data) || (data.senderName is string && data.senderName.size() <= 100))
+        && (!('createdAt' in data) || data.createdAt == request.time || data.createdAt is number);
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['title', 'status', 'createdBy']) && data.title is string && data.title.size() <= 200
+        && data.status in ['todo', 'in_progress', 'done']
+        && data.createdBy is string && data.createdBy == request.auth.uid
+        && (!('description' in data) || (data.description is string && data.description.size() <= 5000))
+        && (!('assigneeId' in data) || (data.assigneeId is string && data.assigneeId.size() <= 128))
+        && (!('createdAt' in data) || data.createdAt == request.time || data.createdAt is number)
+        && (!('updatedAt' in data) || data.updatedAt == request.time || data.updatedAt is number);
+    }
+
+    function isValidDocument(data) {
+      return data.keys().hasAll(['title', 'content', 'updatedAt']) && data.title is string && data.title.size() <= 200
+        && data.content is string && data.content.size() <= 500000
+        && (!('lastEditedBy' in data) || (data.lastEditedBy is string && data.lastEditedBy.size() <= 128))
+        && (data.updatedAt == request.time || data.updatedAt is number);
+    }
+
+    // Rules
+    
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn(); 
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming());
+      allow update: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming());
+    }
+
+    match /projects/{projectId} {
+      allow get: if isProjectMember(projectId);
+      allow list: if isSignedIn() && exists(/databases/$(database)/documents/projects/$(projectId)/members/$(request.auth.uid)); 
+      // Firestore rule for `list` must be checked against resource usually, but for subcollections it's easier to query member collections.
+      // Wait, a better list rule for projects:
+      // allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid; // This won't allow members to list it. It's better to fetch projects by ID if we listed their member subcollections.
+    }
+    // Alternatively, let's fix list
+    match /projects/{projectId} {
+      allow read: if isProjectMember(projectId) || (isSignedIn() && request.auth.uid in resource.data.memberIds) || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(projectId) && isValidProject(incoming());
+      allow update: if isProjectOwner(projectId) && isValidProject(incoming()) && incoming().ownerId == existing().ownerId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt', 'memberIds']);
+      allow delete: if isProjectOwner(projectId);
+    }
+
+    match /projects/{projectId}/members/{userId} {
+      allow get: if isProjectMember(projectId) || isProjectOwner(projectId);
+      allow list: if isProjectMember(projectId) || isProjectOwner(projectId);
+      allow create: if isProjectOwner(projectId) && isValidId(userId) && isValidMember(incoming());
+      // Also allow the creator to add themselves on project creation!
+      // This is a catch-22 if creator isn't a member yet, they can't create if only owner. But creator IS owner due to the project document setup, so exists(...) for owner is fine if they created it in a batch.
+      // Or explicitly allow if request.auth.uid == userId as long as they are the owner of the project.
+      allow create: if isSignedIn() && isValidId(userId) && (isProjectOwner(projectId) || (get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid)) && isValidMember(incoming());
+      
+      allow update: if isProjectOwner(projectId) && isValidMember(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['role']);
+      allow delete: if isProjectOwner(projectId) || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    match /projects/{projectId}/channels/{channelId} {
+      allow read: if isProjectMember(projectId);
+      allow create: if isProjectMember(projectId) && isValidId(channelId) && isValidChannel(incoming());
+      allow update: if isProjectMember(projectId) && isValidChannel(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['name']);
+      allow delete: if isProjectOwner(projectId);
+    }
+
+    match /projects/{projectId}/channels/{channelId}/messages/{messageId} {
+      allow read: if isProjectMember(projectId);
+      allow create: if isProjectMember(projectId) && isValidId(messageId) && isValidMessage(incoming());
+      allow update: if isProjectMember(projectId) && isValidMessage(incoming()) && incoming().senderId == existing().senderId && request.auth.uid == existing().senderId && incoming().diff(existing()).affectedKeys().hasOnly(['text']);
+      allow delete: if isProjectMember(projectId) && request.auth.uid == existing().senderId;
+    }
+
+    match /projects/{projectId}/tasks/{taskId} {
+      allow read: if isProjectMember(projectId);
+      allow create: if isProjectMember(projectId) && isValidId(taskId) && isValidTask(incoming());
+      allow update: if isProjectMember(projectId) && isValidTask(incoming()) && incoming().createdBy == existing().createdBy && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'status', 'assigneeId', 'updatedAt']);
+      allow delete: if isProjectMember(projectId) && (request.auth.uid == existing().createdBy || isProjectOwner(projectId));
+    }
+
+    match /projects/{projectId}/documents/{documentId} {
+      allow read: if isProjectMember(projectId);
+      allow create: if isProjectMember(projectId) && isValidId(documentId) && isValidDocument(incoming());
+      allow update: if isProjectMember(projectId) && isValidDocument(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'lastEditedBy', 'updatedAt']);
+      allow delete: if isProjectOwner(projectId) || isProjectMember(projectId);
+    }
+  }
+}

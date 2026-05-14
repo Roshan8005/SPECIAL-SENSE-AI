@@ -1,0 +1,121 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user profile in the application.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["email"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "A collaborative workspace.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "memberIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["name", "ownerId", "memberIds"]
+    },
+    "ProjectMember": {
+      "title": "Project Member",
+      "description": "User access map for a project.",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "enum": ["editor", "viewer"] },
+        "joinedAt": { "type": "number" }
+      },
+      "required": ["role"]
+    },
+    "ChatChannel": {
+      "title": "Chat Channel",
+      "description": "A channel for team communication within a project",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["name"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A chat message.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["text", "senderId"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A task for project progress tracking.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["todo", "in_progress", "done"] },
+        "assigneeId": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["title", "status", "createdBy"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "A collaborative document.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "lastEditedBy": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["title", "content", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Projects"
+    },
+    "/projects/{projectId}/members/{userId}": {
+      "schema": { "$ref": "#/entities/ProjectMember" },
+      "description": "Project members"
+    },
+    "/projects/{projectId}/channels/{channelId}": {
+      "schema": { "$ref": "#/entities/ChatChannel" },
+      "description": "Channels in a project"
+    },
+    "/projects/{projectId}/channels/{channelId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Messages inside a chat channel"
+    },
+    "/projects/{projectId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Tasks within a project"
+    },
+    "/projects/{projectId}/documents/{documentId}": {
+      "schema": { "$ref": "#/entities/Document" },
+      "description": "Documents within a project"
+    }
+  }
+}
