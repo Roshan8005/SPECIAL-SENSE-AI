@@ -1,4 +1,4 @@
-name: CI
+name: Node CI
 
 on:
   push:
@@ -11,11 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Use Node.js
+      uses: actions/setup-node@v4
       with:
-        python-version: '3.12'
-    - name: Lint with Ruff
-      run: |
-        pip install ruff
-        ruff check .
+        node-version: '20.x'
+    - run: npm install
+    - run: npm run build
